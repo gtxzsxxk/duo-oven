@@ -119,11 +119,18 @@ static const struct maxim_thermocouple_chip maxim_thermocouple_chips[] = {
 		},
 };
 
+#ifndef IIO_DMA_MINALIGN
+#ifndef ARCH_DMA_MINALIGN
+#define ARCH_DMA_MINALIGN L1_CACHE_BYTES
+#endif
+#define IIO_DMA_MINALIGN ARCH_DMA_MINALIGN
+#endif
+
 struct maxim_thermocouple_data {
 	struct spi_device *spi;
 	const struct maxim_thermocouple_chip *chip;
 
-	u8 buffer[16] ____cacheline_aligned;
+	u8 buffer[16] __aligned(IIO_DMA_MINALIGN);
 	char tc_type;
 };
 

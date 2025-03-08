@@ -24,6 +24,7 @@
 #include <linux/skbuff.h>
 #include <linux/delay.h>
 #include <linux/spi/spi.h>
+#include <linux/of_gpio.h>
 
 #include "enc28j60_hw.h"
 
@@ -1543,6 +1544,7 @@ static int enc28j60_probe(struct spi_device *spi)
 	struct net_device *dev;
 	struct enc28j60_net *priv;
 	int ret = 0;
+	unsigned long irq_flags = IRQF_ONESHOT;
 
 	if (netif_msg_drv(&debug))
 		dev_info(&spi->dev, "Ethernet driver %s loaded\n", DRV_VERSION);
@@ -1581,16 +1583,29 @@ static int enc28j60_probe(struct spi_device *spi)
 	/* Board setup must set the relevant edge trigger type;
 	 * level triggers won't currently work.
 	 */
-	ret = request_irq(spi->irq, enc28j60_irq, 0, DRV_NAME, priv);
+	if (spi->irq > 0) {
+		dev->irq = spi->irq;
+	} else {
+		/* Try loading devicetree property irq-gpio */
+		struct gpio_desc *irq_gpio_desc = devm_fwnode_gpiod_get_index(&spi->dev,
+				of_fwnode_handle(spi->dev.of_node), "irq", 0, GPIOD_IN, NULL);
+		if (IS_ERR(irq_gpio_desc)) {
+			dev_err(&spi->dev, "unable to get a valid irq gpio\n");
+			goto error_irq;
+		}
+		dev->irq = gpiod_to_irq(irq_gpio_desc);
+		irq_flags |= IRQF_TRIGGER_FALLING;
+	}
+
+	ret = request_irq(dev->irq, enc28j60_irq, irq_flags, DRV_NAME, priv);
 	if (ret < 0) {
 		if (netif_msg_probe(priv))
 			dev_err(&spi->dev, "request irq %d failed (ret = %d)\n",
-				spi->irq, ret);
+				dev->irq, ret);
 		goto error_irq;
 	}
 
 	dev->if_port = IF_PORT_10BASET;
-	dev->irq = spi->irq;
 	dev->netdev_ops = &enc28j60_netdev_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
 	dev->ethtool_ops = &enc28j60_ethtool_ops;
@@ -1608,7 +1623,7 @@ static int enc28j60_probe(struct spi_device *spi)
 	return 0;
 
 error_register:
-	free_irq(spi->irq, priv);
+	free_irq(dev->irq, priv);
 error_irq:
 	free_netdev(dev);
 error_alloc:
@@ -1620,7 +1635,7 @@ static int enc28j60_remove(struct spi_device *spi)
 	struct enc28j60_net *priv = spi_get_drvdata(spi);
 
 	unregister_netdev(priv->netdev);
-	free_irq(spi->irq, priv);
+	free_irq(priv->netdev->irq, priv);
 	free_netdev(priv->netdev);
 
 	return 0;

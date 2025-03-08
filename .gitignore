@@ -20,3 +20,6 @@ ncscope.*
 
 __pycache__
 .vscode
+
+br.log
+buildroot-2021.05/dl

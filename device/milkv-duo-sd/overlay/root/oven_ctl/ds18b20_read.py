@@ -11,18 +11,15 @@ class Ds18b20Sensor(TempSensor):
         devices = [d for d in os.listdir(base_path) if not d.startswith("w1_bus_master")]
         if len(devices) == 0:
             raise FileNotFoundError("Cannot find ds18b20")
-        device = os.path.join(base_path, devices[0], "temperature")
-        self.dev_fp = open(device, "r")
+        self.dev_path = os.path.join(base_path, devices[0], "temperature")
 
 
     def read_value(self):
-        temp_raw = self.dev_fp.read().strip()
+        fp = open(self.dev_path, "r")
+        temp_raw = fp.read().strip()
+        fp.close()
         if temp_raw:
             temp_celsius = float(temp_raw) / 1000
             return temp_celsius
         
         raise IOError("Cannot read value from ds18b20")
-
-
-    def __del__(self):
-        close(self.dev_fp)

@@ -232,6 +232,7 @@
 		clocks = <&clk CV180X_CLK_SPI>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		bias-pull-up;
 	};
 
 	spi3:spi3@041B0000 {

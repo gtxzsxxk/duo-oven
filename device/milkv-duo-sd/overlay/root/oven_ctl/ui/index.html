@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能烤箱控制面板 Ultra</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.7.16/dist/vue.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.0/echarts.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
+
+    <style>
+        :root {
+            --primary-color: #4A90E2;
+            --danger-color: #FF5A5F;
+            --success-color: #34C759;
+            --card-bg: linear-gradient(145deg, rgba(255,255,255,0.12), rgba(255,255,255,0.08));
+            --card-border: rgba(255,255,255,0.15);
+            --bg-color: #0F172A;
+            --text-color: #E2E8F0;
+            --btn-text-color: #E2E8F0;
+        }
+
+        [data-theme="light"] {
+            --card-bg: linear-gradient(145deg, rgba(255,255,255,0.9), rgba(255,255,255,0.8));
+            --card-border: rgba(0,0,0,0.1);
+            --bg-color: #F8F9FA;
+            --text-color: #212529;
+            --btn-text-color: #E2E8F0;
+        }
+
+        html,body{ height:100% }
+
+        #app {
+            width: 100%;
+            height: 100%;
+            background: var(--bg-color) !important;
+            color: var(--text-color) !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            transition: background 0.3s ease, color 0.3s ease;
+        }
+
+        * {
+            color: var(--text-color) !important;
+        }
+
+        .container-adaptive {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        .dashboard-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            backdrop-filter: blur(12px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            min-height: 200px;
+        }
+
+        .dashboard-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 48px rgba(0,0,0,0.2);
+        }
+
+        .temperature-badge {
+            padding: 8px 16px;
+            border-radius: 12px;
+            background: rgba(74, 144, 226, 0.15);
+            backdrop-filter: blur(4px);
+        }
+
+        .btn-bootstrap-text {
+            color: var(--btn-text-color) !important;
+        }
+
+        .btn-theme-toggle {
+            position: fixed;
+            right: 2rem;
+            bottom: 2rem;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+        }
+
+        .camera-card {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .camera-loading {
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+
+        .row-gap {
+            margin-bottom: 2rem;
+        }
+
+        #chart-container {
+            height: 360px;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .status-card {
+            min-height: auto !important;
+            height: auto !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="app" :data-theme="themeMode">
+        <button class="btn btn-outline-secondary btn-theme-toggle" v-on:click="toggleTheme">
+            {{ themeMode === 'dark' ? '☀️' : '🌙' }}
+        </button>
+
+        <div class="container-adaptive py-4">
+            <!-- 第一行：图表 -->
+            <div class="row row-gap g-4">
+                <div class="col-md-8">
+                    <div class="dashboard-card p-4 h-200">
+                        <div id="chart-container"></div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="dashboard-card p-4 camera-card" style="height: 410px;">
+                        <h5 class="mb-4">实时监控</h5>
+                        <div class="camera-feed position-relative" 
+                             style="aspect-ratio:16/9">
+                            <img :src="cameraImage" 
+                                 class="img-fluid rounded-3">
+                            <div class="camera-timestamp position-absolute" 
+                                 style="bottom:12px; right:12px">
+                                {{ lastCapture | timeFormat }}
+                            </div>
+                            <div v-if="!cameraLoaded && cameraInitialized"
+                                 class="position-absolute w-100 h-100 d-flex align-items-center justify-content-center camera-loading"
+                                 style="bottom: 8px">
+                                下载摄像头数据...
+                            </div>
+                            <div v-if="!cameraInitialized"
+                                 class="position-absolute w-100 h-100 d-flex align-items-center justify-content-center camera-loading">
+                                初始化摄像头...
+                            </div>
+                        </div>
+                        <div class="dashboard-card status-card mt-3 p-3">
+                            <div class="d-flex justify-content-between">
+                                <span>加热管状态：</span>
+                                <span :class="heaterStatus === '正常' ? 'text-success' : 'text-danger'">
+                                    {{ heaterStatus }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 第二行：状态与控制 -->
+            <div class="row row-gap g-4">
+                <!-- 温度状态 -->
+                <div class="col-md-4">
+                    <div class="dashboard-card p-4 h-100">
+                        <h5 class="mb-4">温度监测</h5>
+                        <div class="d-flex justify-content-between mb-3">
+                            <div>
+                                <div class="text-muted">内部温度</div>
+                                <div class="display-4 fw-bold" 
+                                     :class="tempStatus.internal > 200 ? 'text-danger' : 'text-primary'">
+                                    {{ tempStatus.internal }}°C
+                                </div>
+                            </div>
+                            <div>
+                                <div class="text-muted">表面温度</div>
+                                <div class="display-4 fw-bold text-secondary">
+                                    {{ tempStatus.surface }}°C
+                                </div>
+                            </div>
+                        </div>
+                        <div class="temperature-badge d-inline-block">
+                            {{ tempTrend }} {{ tempRate }}°C/min
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 控制面板 -->
+                <div class="col-md-4">
+                    <div class="dashboard-card p-4 h-100">
+                        <h5 class="mb-4">加热控制</h5>
+                        <select v-model="selectedStrategy" 
+                                class="form-select mb-3">
+                            <option v-for="s in strategies" :value="s.id">
+                                {{ s.name }}
+                            </option>
+                        </select>
+                        <br>
+                        <div class="d-grid gap-3">
+                            <button class="btn btn-lg btn-success btn-bootstrap-text" 
+                                    :disabled="!heatingEnabled"
+                                    @click="toggleHeating">
+                                {{ isHeating ? '停止加热' : '开始加热' }}
+                            </button>
+                            <button class="btn btn-lg btn-danger btn-bootstrap-text" 
+                                    @click="emergencyStop">
+                                紧急停止
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 策略管理 -->
+                <div class="col-md-4">
+                    <div class="dashboard-card p-4 h-100">
+                        <h5 class="mb-4">策略管理</h5>
+                        <div class="mb-3">
+                            <input type="file" 
+                                   @change="handleFileUpload"
+                                   class="form-control mb-2"
+                                   accept=".py">
+                            <button class="btn btn-outline-primary w-100" 
+                                    @click="uploadStrategy">
+                                上传策略
+                            </button>
+                        </div>
+                        <div class="list-group">
+                            <div v-for="s in strategies" 
+                                 class="list-group-item strategy-item">
+                                <span>{{ s.name }}</span>
+                                <button class="btn btn-sm btn-danger btn-bootstrap-text"
+                                        @click="deleteStrategy(s.id)">
+                                    删除
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        new Vue({
+            el: '#app',
+            data: {
+                themeMode: 'light',
+                isHeating: false,
+                heatingEnabled: true,
+                tempStatus: { internal: 25, surface: 32 },
+                tempRate: 0,
+                tempTrend: '→',
+                selectedStrategy: null,
+                strategies: [
+                    { id: 1, name: '基础烘焙策略' },
+                    { id: 2, name: '高温快烤策略' }
+                ],
+                cameraImage: '',
+                lastCapture: new Date(),
+                cameraLoaded: false,
+                cameraInitialized: false,
+                heaterStatus: '正常',
+                dataQueue: [],
+                maxDataPoints: 120
+            },
+            filters: {
+                timeFormat(value) {
+                    return moment(value).format('HH:mm:ss')
+                }
+            },
+            mounted() {
+                this.initChart()
+                this.startDataSimulation()
+                this.simulateCamera()
+            },
+            methods: {
+                toggleTheme() {
+                    this.themeMode = this.themeMode === 'light' ? 'dark' : 'light'
+                },
+
+                initChart() {
+                    this.chart = echarts.init(document.getElementById('chart-container'))
+                    this.updateChart()
+                },
+
+                updateChart() {
+                    const option = {
+                        grid: { top: 20, bottom: 40, left: 60, right: 20 },
+                        xAxis: {
+                            type: 'time',
+                            axisLabel: {
+                                formatter: value => moment(value).format('HH:mm:ss')
+                            }
+                        },
+                        yAxis: { 
+                            name: '温度 (°C)',
+                            scale:true
+                        },
+                        series: [{
+                            type: 'line',
+                            data: this.dataQueue,
+                            smooth: true,
+                            lineStyle: { width: 2 },
+                            areaStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(74, 144, 226, 0.3)' },
+                                    { offset: 1, color: 'rgba(74, 144, 226, 0.01)' }
+                                ])
+                            }
+                        }]
+                    }
+                    this.chart.setOption(option)
+                },
+
+                startDataSimulation() {
+                    setInterval(() => {
+                        // 持续更新温度数据
+                        const baseTemp = this.isHeating ? 
+                            this.tempStatus.internal + (Math.random() * 2 - 0.5) :
+                            this.tempStatus.internal - (Math.random() * 0.5)
+                        
+                        const newTemp = Math.max(20, Math.min(baseTemp, 280))
+                        const timestamp = new Date()
+                        
+                        this.dataQueue.push([timestamp, newTemp])
+                        if(this.dataQueue.length > this.maxDataPoints) {
+                            this.dataQueue.shift()
+                        }
+                        
+                        this.tempStatus.internal = Math.round(newTemp)
+                        this.tempStatus.surface = Math.round(newTemp * 0.2 + 30)
+                        
+                        if(this.dataQueue.length >= 2) {
+                            const delta = this.dataQueue[this.dataQueue.length-1][1] - 
+                                        this.dataQueue[this.dataQueue.length-2][1]
+                            this.tempRate = Math.abs(delta * 12).toFixed(1)
+                            this.tempTrend = delta > 0 ? '▲' : delta < 0 ? '▼' : '→'
+                        }
+                        
+                        this.updateChart()
+                    }, 1000)
+                },
+
+                simulateCamera() {
+                    setInterval(() => {
+                        this.cameraLoaded = false
+                        this.cameraInitialized = true;
+                        setTimeout(() => {
+                            this.cameraImage = `https://picsum.photos/800/450?t=${Date.now()}`
+                            this.lastCapture = new Date()
+                            this.cameraLoaded = true
+                        }, 500)
+                    }, 5000)
+                },
+
+                deleteStrategy(id) {
+                    this.strategies = this.strategies.filter(s => s.id !== id)
+                },
+
+                toggleHeating() {
+                    this.isHeating = !this.isHeating
+                    if(this.isHeating) {
+                        this.dataQueue = []
+                    }
+                },
+
+                emergencyStop() {
+                    this.isHeating = false
+                    this.heatingEnabled = false
+                    setTimeout(() => this.heatingEnabled = true, 5000)
+                },
+
+                handleFileUpload(e) {
+                    // TODO: 处理文件上传逻辑
+                    const file = e.target.files[0]
+                    console.log('上传文件:', file.name)
+                },
+
+                uploadStrategy() {
+                    // TODO: 实现上传逻辑
+                    this.strategies.push({
+                        id: Date.now(),
+                        name: `自定义策略 ${this.strategies.length + 1}`
+                    })
+                },
+            }
+        })
+    </script>
+</body>
+</html>

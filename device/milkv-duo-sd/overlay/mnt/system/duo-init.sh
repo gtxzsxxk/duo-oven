@@ -10,3 +10,7 @@ duo-pinmux -w GP14/GP14 > /dev/null
 # Insmod PWM Module
 insmod /mnt/system/ko/cv180x_pwm.ko
 
+# Configure eth0 and route information
+ip addr add 192.168.9.100/24 dev eth0
+ip link set eth0 up
+ip route add default via 192.168.9.1 dev eth0

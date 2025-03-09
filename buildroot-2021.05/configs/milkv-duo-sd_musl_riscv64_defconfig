@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Buildroot -g586be389a-dirty Configuration
+# Buildroot -g7ee10c2a8 Configuration
 #
 BR2_HAVE_DOT_CONFIG=y
 BR2_HOST_GCC_AT_LEAST_4_9=y
@@ -2611,10 +2611,7 @@ BR2_PACKAGE_NTP_NTPTIME=y
 # BR2_PACKAGE_OPEN_PLC_UTILS is not set
 # BR2_PACKAGE_OPENOBEX is not set
 # BR2_PACKAGE_OPENRESOLV is not set
-BR2_PACKAGE_OPENSSH=y
-BR2_PACKAGE_OPENSSH_CLIENT=y
-# BR2_PACKAGE_OPENSSH_SERVER is not set
-BR2_PACKAGE_OPENSSH_KEY_UTILS=y
+# BR2_PACKAGE_OPENSSH is not set
 # BR2_PACKAGE_OPENSWAN is not set
 # BR2_PACKAGE_OPENVPN is not set
 # BR2_PACKAGE_P910ND is not set

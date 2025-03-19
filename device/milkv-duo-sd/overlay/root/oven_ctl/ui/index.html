@@ -8,6 +8,7 @@
     <script src="https://cdn.jsdelivr.net/npm/vue@2.7.16/dist/vue.js"></script>
     <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.0/echarts.min.js"></script>
     <script src="https://cdn.bootcdn.net/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 
     <style>
         :root {
@@ -138,7 +139,7 @@
                         <div class="camera-feed position-relative" 
                              style="aspect-ratio:16/9">
                             <img :src="cameraImage" 
-                                 class="img-fluid rounded-3">
+                                 class="img-fluid rounded-3" style="max-height: 235px; width: 100%">
                             <div class="camera-timestamp position-absolute" 
                                  style="bottom:12px; right:12px">
                                 {{ lastCapture | timeFormat }}
@@ -204,14 +205,13 @@
                         </select>
                         <br>
                         <div class="d-grid gap-3">
+                            <input type="text"
+                                   class="form-control mb-2"
+                                   placeholder="策略参数">
                             <button class="btn btn-lg btn-success btn-bootstrap-text" 
                                     :disabled="!heatingEnabled"
                                     @click="toggleHeating">
                                 {{ isHeating ? '停止加热' : '开始加热' }}
-                            </button>
-                            <button class="btn btn-lg btn-danger btn-bootstrap-text" 
-                                    @click="emergencyStop">
-                                紧急停止
                             </button>
                         </div>
                     </div>
@@ -267,8 +267,9 @@
                 cameraLoaded: false,
                 cameraInitialized: false,
                 heaterStatus: '正常',
-                dataQueue: [],
-                maxDataPoints: 120
+                internalTempDataQueue: [],
+                externalTempDataQueue: [],
+                maxDataPoints: 60
             },
             filters: {
                 timeFormat(value) {
@@ -292,7 +293,7 @@
 
                 updateChart() {
                     const option = {
-                        grid: { top: 20, bottom: 40, left: 60, right: 20 },
+                        grid: { top: 40, bottom: 40, left: 60, right: 20 },
                         xAxis: {
                             type: 'time',
                             axisLabel: {
@@ -305,7 +306,18 @@
                         },
                         series: [{
                             type: 'line',
-                            data: this.dataQueue,
+                            data: this.internalTempDataQueue,
+                            smooth: true,
+                            lineStyle: { width: 2 },
+                            areaStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(74, 144, 226, 0.3)' },
+                                    { offset: 1, color: 'rgba(74, 144, 226, 0.01)' }
+                                ])
+                            }
+                        }, {
+                            type: 'line',
+                            data: this.externalTempDataQueue,
                             smooth: true,
                             lineStyle: { width: 2 },
                             areaStyle: {
@@ -321,43 +333,47 @@
 
                 startDataSimulation() {
                     setInterval(() => {
-                        // 持续更新温度数据
-                        const baseTemp = this.isHeating ? 
-                            this.tempStatus.internal + (Math.random() * 2 - 0.5) :
-                            this.tempStatus.internal - (Math.random() * 0.5)
-                        
-                        const newTemp = Math.max(20, Math.min(baseTemp, 280))
-                        const timestamp = new Date()
-                        
-                        this.dataQueue.push([timestamp, newTemp])
-                        if(this.dataQueue.length > this.maxDataPoints) {
-                            this.dataQueue.shift()
-                        }
-                        
-                        this.tempStatus.internal = Math.round(newTemp)
-                        this.tempStatus.surface = Math.round(newTemp * 0.2 + 30)
-                        
-                        if(this.dataQueue.length >= 2) {
-                            const delta = this.dataQueue[this.dataQueue.length-1][1] - 
-                                        this.dataQueue[this.dataQueue.length-2][1]
-                            this.tempRate = Math.abs(delta * 12).toFixed(1)
-                            this.tempTrend = delta > 0 ? '▲' : delta < 0 ? '▼' : '→'
-                        }
-                        
-                        this.updateChart()
-                    }, 1000)
+                        axios.get("temperature/intenal")
+                            .then(response => {
+                                let newInternalTemp = parseFloat(response.data["value"]);
+                                this.internalTempDataQueue.push([new Date(), newInternalTemp]);
+                                if(this.internalTempDataQueue.length > this.maxDataPoints) {
+                                    this.internalTempDataQueue.shift();
+                                }
+                                this.tempStatus.internal = Math.round(newInternalTemp);
+                                if(this.internalTempDataQueue.length >= 2) {
+                                    const delta = this.internalTempDataQueue[this.internalTempDataQueue.length-1][1] - 
+                                                this.internalTempDataQueue[this.internalTempDataQueue.length-2][1]
+                                    this.tempRate = Math.abs(delta / 2.5 * 60).toFixed(1);
+                                    this.tempTrend = delta > 0 ? '▲' : delta < 0 ? '▼' : '→';
+                                }
+                                this.updateChart();
+                            });
+                        axios.get("temperature/external")
+                            .then(response => {
+                                let newExtTemp = parseFloat(response.data["value"]);
+                                this.externalTempDataQueue.push([new Date(), newExtTemp]);
+                                if(this.externalTempDataQueue.length > this.maxDataPoints) {
+                                    this.externalTempDataQueue.shift();
+                                }
+                                this.tempStatus.surface = Math.round(newExtTemp);
+                                this.updateChart();
+                            });
+                    }, 2500)
                 },
 
                 simulateCamera() {
                     setInterval(() => {
                         this.cameraLoaded = false
                         this.cameraInitialized = true;
-                        setTimeout(() => {
-                            this.cameraImage = `https://picsum.photos/800/450?t=${Date.now()}`
-                            this.lastCapture = new Date()
-                            this.cameraLoaded = true
-                        }, 500)
-                    }, 5000)
+                        axios.get("camera/capture")
+                            .then(response => {
+                                let base64data = response.data["base64"];
+                                this.cameraImage = "data:image/jpeg;base64," + base64data;
+                                this.lastCapture = new Date();
+                                this.cameraLoaded = true;
+                            });
+                    }, 5000);
                 },
 
                 deleteStrategy(id) {
@@ -366,9 +382,7 @@
 
                 toggleHeating() {
                     this.isHeating = !this.isHeating
-                    if(this.isHeating) {
-                        this.dataQueue = []
-                    }
+                    /* TODO: implement this in backend */
                 },
 
                 emergencyStop() {

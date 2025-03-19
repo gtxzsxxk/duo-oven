@@ -14,3 +14,5 @@ insmod /mnt/system/ko/cv180x_pwm.ko
 ip addr add 192.168.9.100/24 dev eth0
 ip link set eth0 up
 ip route add default via 192.168.9.1 dev eth0
+
+sh /mnt/system/start_server.sh &

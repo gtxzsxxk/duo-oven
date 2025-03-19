@@ -23,3 +23,6 @@ __pycache__
 
 br.log
 buildroot-2021.05/dl
+
+uvctest/uvctest
+device/milkv-duo-sd/overlay/root/oven_ctl/camera/uvcgrab

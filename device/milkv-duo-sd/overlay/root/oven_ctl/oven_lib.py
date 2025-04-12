@@ -75,8 +75,55 @@ def oven_init():
     heating_gpio_init()
     heating_thread.start()
 
+
+def oven_strategy_start(filename, arg):
+    heating_thread.task_queue.put("strategy==" + filename + "==" + arg)
+
+
+def oven_strategy_stop():
+    heating_thread.task_queue.put("eb")
+
+
+def oven_is_heating():
+    return heating_thread.state == HeatingStateMachine.DO_STRATEGY
+
+
+__internal_temp_last_data = 0
+__internal_temp_last_time = 0
+def oven_temp_internal_buffered():
+    global __internal_temp_last_data, __internal_temp_last_time
+    if time.time() - __internal_temp_last_time >= 0.2:
+        for i in temp_sensor_list:
+            if i.sensor_type == TempSensorType.INTERNAL_HIGH_SENSOR:
+                __internal_temp_last_data = i.read_value()
+                __internal_temp_last_time = time.time()
+                return __internal_temp_last_data
+    else:
+        return __internal_temp_last_data
+
+
+__external_temp_last_data = 0
+__external_temp_last_time = 0
+def oven_temp_external_buffered():
+    global __external_temp_last_data, __external_temp_last_time
+    if time.time() - __external_temp_last_time >= 1.5:
+        for i in temp_sensor_list:
+            if i.sensor_type == TempSensorType.EXTERNAL_LOW_SENSOR:
+                __external_temp_last_data = i.read_value()
+                __external_temp_last_time = time.time()
+                return __external_temp_last_data
+    else:
+        return __external_temp_last_data
+
+
 def camera_capture_base64():
     return capture_and_encode()
+
+def heating_state_str():
+    state_str = ""
+    for i in heating_state:
+        state_str += "1" if i else "0"
+    return state_str
 
 if __name__ == "__main__":
     oven_init()

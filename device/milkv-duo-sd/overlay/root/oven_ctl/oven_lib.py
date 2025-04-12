@@ -3,7 +3,7 @@ from ds18b20_read import Ds18b20Sensor
 from max6675_read import Max6675Sensor
 from heating_gpio import *
 from uvc_read import capture_and_encode
-from config import CONFIG_EMERGENCY_BRAKE_INTERVAL
+from strategy_manager import sm_strategy_load_code, sm_strategy_register, sm_strategy_exec
 from enum import Enum, auto
 import time
 import threading
@@ -16,38 +16,54 @@ class HeatingStateMachine(Enum):
 class HeatingThread(threading.Thread):
     def __init__(self):
         super().__init__()
-        self.last_request_time = time.time()
         self.task_queue = queue.Queue()
         self.state = HeatingStateMachine.STOP_HEATING
+        self.code = ""
+        self.heating_arg = ""
+        self.heating_working_seconds = 0
+        self.heating_interval = 0.1
 
 
     def run(self):
         while True:
+            time_start = time.time()
             if not self.task_queue.empty():
                 # Do the tasks
                 task = self.task_queue.get_nowait()
-                if task == "ping":
-                    pass
-                elif task.startswith("strategy+"):
+                if task.startswith("strategy=="):
                     self.state = HeatingStateMachine.DO_STRATEGY
+                    filename = task.split('==')[1]
+                    self.heating_arg = task.split('==')[2]
+                    self.code = sm_strategy_load_code(filename)
+                    self.heating_working_seconds = 0
+                    print("new strategy", filename)
                 elif task == "eb":
                     self.state = HeatingStateMachine.STOP_HEATING
-                self.last_request_time = time.time()
-            else:
-                no_request_interval = time.time() - self.last_request_time
-                if no_request_interval > CONFIG_EMERGENCY_BRAKE_INTERVAL:
-                    self.state = HeatingStateMachine.STOP_HEATING
+                    print("Emergency Brake")
 
             if self.state == HeatingStateMachine.STOP_HEATING:
                 heating_disable(0)
                 heating_disable(1)
+                self.code = ""
             elif self.state == HeatingStateMachine.DO_STRATEGY:
-                # execute the strategy python file
-                pass
-            time.sleep(0.050)
-        
+                if self.code != "":
+                    sm_strategy_register(self.code)
+                    try:
+                        ret = sm_strategy_exec(oven_temp_internal_buffered(), oven_temp_external_buffered(), self.heating_working_seconds, self.heating_arg)
+                        if ret == 2:
+                            # 主动结束逻辑
+                            self.state = HeatingStateMachine.STOP_HEATING
+                        self.heating_working_seconds += self.heating_interval
+                    except:
+                        pass
+
+            time_delta = time.time() - time_start
+            if time_delta < self.heating_interval:
+                time.sleep(self.heating_interval - time_delta)
+
 
 temp_sensor_list = []
+heating_thread = HeatingThread()
 
 def oven_temp_sensors_init():
     temp_sensor_list.append(Ds18b20Sensor())
@@ -57,20 +73,7 @@ def oven_temp_sensors_init():
 def oven_init():
     oven_temp_sensors_init()
     heating_gpio_init()
-
-def oven_temp_internal():
-    for i in temp_sensor_list:
-        if i.sensor_type == TempSensorType.INTERNAL_HIGH_SENSOR:
-            return i.read_value()
-
-    raise FileNotFoundError("Cannot find internal temperature")
-
-def oven_temp_external():
-    for i in temp_sensor_list:
-        if i.sensor_type == TempSensorType.EXTERNAL_LOW_SENSOR:
-            return i.read_value()
-
-    raise FileNotFoundError("Cannot find external temperature")
+    heating_thread.start()
 
 def camera_capture_base64():
     return capture_and_encode()

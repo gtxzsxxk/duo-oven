@@ -157,7 +157,7 @@
                         <div class="dashboard-card status-card mt-3 p-3">
                             <div class="d-flex justify-content-between">
                                 <span>加热管状态：</span>
-                                <span :class="heaterStatus === '正常' ? 'text-success' : 'text-danger'">
+                                <span :class="(heaterStatus.indexOf('1') == -1) ? 'text-success' : 'text-danger'">
                                     {{ heaterStatus }}
                                 </span>
                             </div>
@@ -199,7 +199,7 @@
                         <h5 class="mb-4">加热控制</h5>
                         <select v-model="selectedStrategy" 
                                 class="form-select mb-3">
-                            <option v-for="s in strategies" :value="s.id">
+                            <option v-for="s in strategies" :value="s">
                                 {{ s.name }}
                             </option>
                         </select>
@@ -207,8 +207,10 @@
                         <div class="d-grid gap-3">
                             <input type="text"
                                    class="form-control mb-2"
-                                   placeholder="策略参数">
-                            <button class="btn btn-lg btn-success btn-bootstrap-text" 
+                                   :placeholder="selectedStrategy == null ? '' : selectedStrategy.argument"
+                                   v-model="heatingArgument">
+                            <button class="btn btn-lg btn-bootstrap-text"
+                                    :class="isHeating ? 'btn-danger' : 'btn-success'"
                                     :disabled="!heatingEnabled"
                                     @click="toggleHeating">
                                 {{ isHeating ? '停止加热' : '开始加热' }}
@@ -222,7 +224,7 @@
                     <div class="dashboard-card p-4 h-100">
                         <h5 class="mb-4">策略管理</h5>
                         <div class="mb-3">
-                            <input type="file" 
+                            <input type="file"
                                    @change="handleFileUpload"
                                    class="form-control mb-2"
                                    accept=".py">
@@ -236,7 +238,7 @@
                                  class="list-group-item strategy-item">
                                 <span>{{ s.name }}</span>
                                 <button class="btn btn-sm btn-danger btn-bootstrap-text"
-                                        @click="deleteStrategy(s.id)">
+                                        @click="deleteStrategy(s.filename)">
                                     删除
                                 </button>
                             </div>
@@ -254,14 +256,11 @@
                 themeMode: 'light',
                 isHeating: false,
                 heatingEnabled: true,
-                tempStatus: { internal: 25, surface: 32 },
+                tempStatus: { internal: 0, surface: 0 },
                 tempRate: 0,
                 tempTrend: '→',
                 selectedStrategy: null,
-                strategies: [
-                    { id: 1, name: '基础烘焙策略' },
-                    { id: 2, name: '高温快烤策略' }
-                ],
+                strategies: [],
                 cameraImage: '',
                 lastCapture: new Date(),
                 cameraLoaded: false,
@@ -269,7 +268,9 @@
                 heaterStatus: '正常',
                 internalTempDataQueue: [],
                 externalTempDataQueue: [],
-                maxDataPoints: 60
+                maxDataPoints: 60,
+                heatingArgument: "",
+                strategyFile: null,
             },
             filters: {
                 timeFormat(value) {
@@ -278,8 +279,9 @@
             },
             mounted() {
                 this.initChart()
-                this.startDataSimulation()
-                this.simulateCamera()
+                this.requestForEnvData()
+                this.requestForCamera()
+                this.requestForStrategies()
             },
             methods: {
                 toggleTheme() {
@@ -331,11 +333,11 @@
                     this.chart.setOption(option)
                 },
 
-                startDataSimulation() {
+                requestForEnvData() {
                     setInterval(() => {
-                        axios.get("temperature/intenal")
+                        axios.get("packed_env_info")
                             .then(response => {
-                                let newInternalTemp = parseFloat(response.data["value"]);
+                                let newInternalTemp = parseFloat(response.data["temp"]["internal"]);
                                 this.internalTempDataQueue.push([new Date(), newInternalTemp]);
                                 if(this.internalTempDataQueue.length > this.maxDataPoints) {
                                     this.internalTempDataQueue.shift();
@@ -347,22 +349,24 @@
                                     this.tempRate = Math.abs(delta / 2.5 * 60).toFixed(1);
                                     this.tempTrend = delta > 0 ? '▲' : delta < 0 ? '▼' : '→';
                                 }
-                                this.updateChart();
-                            });
-                        axios.get("temperature/external")
-                            .then(response => {
-                                let newExtTemp = parseFloat(response.data["value"]);
+
+                                let newExtTemp = parseFloat(response.data["temp"]["external"]);
                                 this.externalTempDataQueue.push([new Date(), newExtTemp]);
                                 if(this.externalTempDataQueue.length > this.maxDataPoints) {
                                     this.externalTempDataQueue.shift();
                                 }
                                 this.tempStatus.surface = Math.round(newExtTemp);
+
                                 this.updateChart();
+
+                                this.heaterStatus = response.data["heating"]["tube_state"];
+                                this.isHeating = response.data["heating"]["is_heating"];
+                                this.heatingEnabled = true;
                             });
-                    }, 2500)
+                    }, 5000)
                 },
 
-                simulateCamera() {
+                requestForCamera() {
                     setInterval(() => {
                         this.cameraLoaded = false
                         this.cameraInitialized = true;
@@ -373,36 +377,78 @@
                                 this.lastCapture = new Date();
                                 this.cameraLoaded = true;
                             });
-                    }, 5000);
+                    }, 10500);
                 },
 
-                deleteStrategy(id) {
-                    this.strategies = this.strategies.filter(s => s.id !== id)
+                requestForStrategies() {
+                    axios.get("strategy/get")
+                        .then(response => {
+                            for (let i = 0 ; i < response.data["data"].length; i++) {
+                                this.strategies.push({
+                                    "name": response.data["data"][i]["name"],
+                                    "argument": response.data["data"][i]["argument"],
+                                    "filename": response.data["data"][i]["filename"],
+                                });
+                            }
+                        });
+                },
+
+                deleteStrategy(filename) {
+                    axios.get("strategy/delete/" + filename)
+                        .then(response => {
+                            if (response.data["msg"] == "ok") {
+                                location.reload();
+                            }
+                        });
                 },
 
                 toggleHeating() {
-                    this.isHeating = !this.isHeating
-                    /* TODO: implement this in backend */
-                },
-
-                emergencyStop() {
-                    this.isHeating = false
-                    this.heatingEnabled = false
-                    setTimeout(() => this.heatingEnabled = true, 5000)
+                    if (!this.isHeating) {
+                        if (this.selectedStrategy == null) {
+                            alert("You must choose a strategy");
+                            return;
+                        }
+                        if (this.heatingArgument == "") {
+                            alert("You must input heating argument");
+                            return;
+                        }
+                        axios.get("strategy/enable/" + this.selectedStrategy["filename"] + "/" + this.heatingArgument)
+                            .then(response => {
+                                if (response.data["msg"] != "ok") {
+                                    alert("Failed to enable heating");
+                                }
+                            });
+                        /* allow emergency brake */
+                        this.isHeating = true;
+                    } else {
+                        this.heatingArgument = "";
+                        axios.get("strategy/disable")
+                            .then(response => {
+                                if (response.data["msg"] != "ok") {
+                                    alert("Failed to disable heating");
+                                }
+                            });
+                        this.heatingEnabled = false;
+                    }
                 },
 
                 handleFileUpload(e) {
-                    // TODO: 处理文件上传逻辑
-                    const file = e.target.files[0]
-                    console.log('上传文件:', file.name)
+                    this.strategyFile = e.target.files[0]
                 },
 
                 uploadStrategy() {
-                    // TODO: 实现上传逻辑
-                    this.strategies.push({
-                        id: Date.now(),
-                        name: `自定义策略 ${this.strategies.length + 1}`
-                    })
+                    const formData = new FormData();
+                    formData.append('file', this.strategyFile);
+                    axios.post("strategy/upload", formData, {
+                        headers: {
+                            'Content-Type': 'multipart/form-data'
+                        }
+                    }).then(response => {
+                            if (response.data["msg"] != "ok") {
+                                alert("Failed to upload strategy file");
+                            }
+                            location.reload();
+                        });
                 },
             }
         })
